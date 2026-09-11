@@ -43,6 +43,8 @@ from core.enhanced_analyzer import (
     load_signal_dataset as ea_load_signal_dataset,
 )
 from core.market_timing import comprehensive_timing_analysis
+from core.logger import data_logger
+from core.data_module import assess_market_data_quality
 from addons.telegram_bot import TelegramBot, create_telegram_bot
 from core.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
@@ -72,6 +74,7 @@ for sector_name, sector_tickers in SECTOR_STOCKS.items():
             SECTOR_BY_TICKER[ticker] = sector_name
 
 
+@st.cache_data(ttl=300, show_spinner=False)
 def download_batch_dict(tickers, period="3mo", interval=None, chunk_size=120):
     """Download OHLCV in chunks and return {ticker: DataFrame}."""
     out = {}
@@ -89,6 +92,7 @@ def download_batch_dict(tickers, period="3mo", interval=None, chunk_size=120):
                 kwargs["interval"] = interval
             data = yf.download(**kwargs)
             if data is None or data.empty:
+                data_logger.warning("No data returned for ticker chunk: %s", chunk)
                 continue
 
             if isinstance(data.columns, pd.MultiIndex):
@@ -100,12 +104,22 @@ def download_batch_dict(tickers, period="3mo", interval=None, chunk_size=120):
                             out[ticker] = df
             elif len(chunk) == 1:
                 out[chunk[0]] = data.copy()
-        except Exception:
+        except Exception as exc:
+            data_logger.error("Failed to download ticker chunk %s: %s", chunk, exc)
             continue
     return out
 
 # --- FUNGSI INDIKATOR TEKNIKAL ---
 def calculate_indicators(df):
+    if df is None or df.empty:
+        raise ValueError("Cannot calculate indicators from empty data")
+    required_columns = {"Open", "High", "Low", "Close", "Volume"}
+    missing_columns = required_columns.difference(df.columns)
+    if missing_columns:
+        raise ValueError(f"Missing required market columns: {sorted(missing_columns)}")
+
+    df = df.copy()
+
     # RSI (14)
     df['RSI'] = shared_calculate_rsi(df)
     
@@ -114,7 +128,7 @@ def calculate_indicators(df):
     df['SMA50'] = df['Close'].rolling(window=50).mean()
     
     # ATR (14) untuk Volatilitas
-    from shared_analysis import calculate_atr
+    from core.shared_analysis import calculate_atr
     df['ATR'] = calculate_atr(df)
     
     # Volume Analysis
@@ -130,7 +144,7 @@ def calculate_indicators(df):
     df['EMA21'] = df['Close'].ewm(span=21, adjust=False).mean()
 
     # MACD
-    from shared_analysis import calculate_macd
+    from core.shared_analysis import calculate_macd
     macd = calculate_macd(df)
     df['MACD'] = macd['macd_line']
     df['Signal_Line'] = macd['signal_line']
@@ -143,7 +157,7 @@ def calculate_indicators(df):
     df['%D'] = df['%K'].rolling(window=3).mean()
     
     # Bollinger Bands
-    from shared_analysis import calculate_bollinger_bands
+    from core.shared_analysis import calculate_bollinger_bands
     bb = calculate_bollinger_bands(df)
     df['BB_Middle'] = bb['middle_band']
     df['BB_Upper'] = bb['upper_band']
@@ -151,14 +165,14 @@ def calculate_indicators(df):
     df['BB_Width'] = bb['band_width']
     
     # ADX
-    from shared_analysis import calculate_adx
+    from core.shared_analysis import calculate_adx
     adx = calculate_adx(df)
     df['ADX'] = adx['adx']
     df['Plus_DI'] = adx['plus_di']
     df['Minus_DI'] = adx['minus_di']
     
     # VWAP
-    from shared_analysis import calculate_vwap
+    from core.shared_analysis import calculate_vwap
     df['VWAP'] = calculate_vwap(df)
     
     return df
@@ -484,22 +498,31 @@ def backtest_signal_strategy(df, initial_capital=10000000, risk_per_trade=2):
 
 # --- AI-POWERED SIGNAL BOOSTER ---
 def get_news_sentiment(ticker):
-    """Mendapatkan sentimen berita sederhana untuk saham tertentu."""
+    """Estimate sentiment from available Yahoo Finance headlines."""
     try:
+        news_items = yf.Ticker(ticker).news or []
         news_texts = [
-            f"Saham {ticker} mengalami kenaikan signifikan",
-            f"Prospek {ticker} sangat bagus di kuartal berikutnya",
-            f"Analis merekomendasikan {ticker} sebagai BUY",
+            item.get("title", "")
+            for item in news_items[:10]
+            if item.get("title")
         ]
+        if not news_texts:
+            return {
+                "sentiment_score": 0,
+                "sentiment_label": "NEUTRAL",
+                "data_status": "UNAVAILABLE",
+            }
         sentiments = [TextBlob(text).sentiment.polarity for text in news_texts]
         avg_sentiment = np.mean(sentiments)
         return {
             "sentiment_score": round(avg_sentiment, 3),
             "sentiment_label": "POSITIVE" if avg_sentiment > 0.1 else "NEGATIVE" if avg_sentiment < -0.1 else "NEUTRAL",
+            "data_status": "LIVE_HEADLINES",
         }
     except Exception:
-        return {"sentiment_score": 0, "sentiment_label": "NEUTRAL"}
+        return {"sentiment_score": 0, "sentiment_label": "NEUTRAL", "data_status": "UNAVAILABLE"}
 
+@st.cache_resource(show_spinner=False)
 def train_ml_model(historical_data):
     """Melatih model ML sederhana untuk prediksi sinyal."""
     try:
@@ -570,10 +593,10 @@ def get_ai_signal_boost(df, ticker):
             ml_confidence = 0.5
         ai_score = 0
         ai_reasons = []
-        if sentiment_data["sentiment_label"] == "POSITIVE":
+        if sentiment_data.get("data_status") == "LIVE_HEADLINES" and sentiment_data["sentiment_label"] == "POSITIVE":
             ai_score += 30
             ai_reasons.append(f"Sentimen Positif ({sentiment_data['sentiment_score']:.2f})")
-        elif sentiment_data["sentiment_label"] == "NEGATIVE":
+        elif sentiment_data.get("data_status") == "LIVE_HEADLINES" and sentiment_data["sentiment_label"] == "NEGATIVE":
             ai_score -= 15
             ai_reasons.append(f"Sentimen Negatif ({sentiment_data['sentiment_score']:.2f})")
         if ml_prediction == 1:
@@ -604,9 +627,9 @@ def get_ai_signal_boost(df, ticker):
         }
 
 # --- ADVANCED BACKTESTING ENGINE ---
-def backtest_strategy(data, strategy_type='ma_crossover', initial_capital=10000000):
+def backtest_strategy(data, strategy_type='ma_crossover', initial_capital=10000000, **cost_params):
     """Shared advanced backtesting engine wrapper."""
-    return shared_backtest_strategy(data, strategy_type, initial_capital)
+    return shared_backtest_strategy(data, strategy_type, initial_capital, **cost_params)
 
 def monte_carlo_simulation(data, strategy_type='ma_crossover', initial_capital=10000000, simulations=1000):
     """Shared Monte Carlo wrapper."""
@@ -1965,6 +1988,8 @@ if analysis_mode == "Market Scanner & Heatmap (Otomatis)":
                 batch_weekly = download_batch_dict(scan_universe, period="1y", interval="1wk", chunk_size=120)
                 
                 scan_results = []
+                failed_tickers = {}
+                quality_rows = []
                 
                 progress_text = "Menganalisa Multi-Timeframe..."
                 my_bar = st.progress(0, text=progress_text)
@@ -1974,13 +1999,17 @@ if analysis_mode == "Market Scanner & Heatmap (Otomatis)":
                 for i, ticker in enumerate(scan_universe):
                     try:
                         if ticker not in batch_data:
+                            failed_tickers[ticker] = "daily_data_unavailable"
                             continue
 
                         df = batch_data[ticker].copy()
                         
                         # Bersihkan data kosong
                         df = df.dropna(how='all')
-                        if df.empty or len(df) < 50: # Butuh min 50 data untuk SMA50
+                        quality = assess_market_data_quality(df, min_rows=50)
+                        quality_rows.append({"Ticker": ticker, **quality})
+                        if quality["status"] == "INVALID" or len(df) < 50: # Butuh min 50 data untuk SMA50
+                            failed_tickers[ticker] = quality["message"]
                             continue
                             
                         # Siapkan Data Weekly
@@ -2076,6 +2105,8 @@ if analysis_mode == "Market Scanner & Heatmap (Otomatis)":
                         scan_results.append(item)
                         
                     except Exception as e:
+                        failed_tickers[ticker] = f"processing_error: {type(e).__name__}"
+                        data_logger.error("Failed to process %s: %s", ticker, e)
                         continue
                     
                     # Update progress
@@ -2087,9 +2118,17 @@ if analysis_mode == "Market Scanner & Heatmap (Otomatis)":
                     st.error("Gagal menganalisa data. Coba lagi nanti.")
                 else:
                     st.session_state.scan_df = pd.DataFrame(scan_results)
+                    st.session_state.scan_quality = {
+                        "requested": total_stocks,
+                        "processed": len(scan_results),
+                        "failed": failed_tickers,
+                        "quality_rows": quality_rows,
+                    }
                     scanned_count = len(st.session_state.scan_df)
                     coverage = (scanned_count / total_stocks * 100) if total_stocks else 0
                     st.info(f"Coverage scan: {scanned_count}/{total_stocks} ticker ({coverage:.1f}%).")
+                    if failed_tickers:
+                        st.warning(f"{len(failed_tickers)} ticker tidak diproses. Detail tersedia di ringkasan kualitas data.")
                     st.success("Analisa selesai!")
                         
             except Exception as e:
@@ -2098,6 +2137,24 @@ if analysis_mode == "Market Scanner & Heatmap (Otomatis)":
     # Tampilkan hasil jika ada di session state
     if st.session_state.scan_df is not None:
         df_res = st.session_state.scan_df
+        scan_quality = st.session_state.get("scan_quality", {})
+        if scan_quality:
+            with st.expander("Kualitas Data Scan", expanded=False):
+                st.write(
+                    f"Diproses: {scan_quality.get('processed', 0)}/"
+                    f"{scan_quality.get('requested', 0)} ticker"
+                )
+                failed = scan_quality.get("failed", {})
+                if failed:
+                    st.dataframe(
+                        pd.DataFrame(
+                            [{"Ticker": ticker, "Reason": reason} for ticker, reason in failed.items()]
+                        ),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                else:
+                    st.success("Semua ticker berhasil diproses.")
         smart_defaults = {
             "Candidate": "NO",
             "Candidate_Reason": "legacy_row",

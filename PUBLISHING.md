@@ -5,17 +5,17 @@
 These files are application source, configuration defaults, or dependency metadata:
 
 - `app.py`
-- `config.py` (keep credentials empty; use deployment secrets)
-- `data_module.py`
-- `enhanced_analyzer.py`
-- `idx_all_tickers.py`
-- `logger.py`
-- `market_timing.py`
+- `core/config.py` (keep credentials empty; use deployment secrets)
+- `core/data_module.py`
+- `core/enhanced_analyzer.py`
+- `core/idx_all_tickers.py`
+- `core/logger.py`
+- `core/market_timing.py`
 - `requirements.txt`
-- `shared_analysis.py`
-- `stock_data.py`
-- `sync_stocks.py`
-- `telegram_bot.py`
+- `core/shared_analysis.py`
+- `core/stock_data.py`
+- `addons/sync_stocks.py`
+- `addons/telegram_bot.py`
 - `signal_history.csv` only when the dataset is intentionally shared and contains no private data
 
 ## Keep local on the laptop

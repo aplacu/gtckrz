@@ -7,6 +7,8 @@ import requests
 from typing import List, Dict, Optional
 from datetime import datetime
 
+from core.logger import alert_logger
+
 
 class TelegramBot:
     def __init__(self, bot_token: str, chat_id: str):
@@ -42,9 +44,13 @@ class TelegramBot:
             }
             response = requests.post(url, json=payload, timeout=10)
             response.raise_for_status()
+            response_data = response.json()
+            if not response_data.get("ok", False):
+                alert_logger.error("Telegram rejected message: %s", response_data.get("description", "unknown error"))
+                return False
             return True
-        except Exception as e:
-            print(f"Error sending Telegram message: {e}")
+        except (requests.RequestException, ValueError) as exc:
+            alert_logger.error("Error sending Telegram message: %s", exc)
             return False
     
     def format_scanner_results(self, results: List[Dict], title: str = "📊 Stock Scanner Results") -> str:

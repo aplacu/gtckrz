@@ -1,4 +1,5 @@
 streamlit
+typing_extensions
 yfinance
 pandas
 plotly

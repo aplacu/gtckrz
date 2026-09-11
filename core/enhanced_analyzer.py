@@ -11,7 +11,6 @@ import os
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from core.shared_analysis import (
@@ -46,9 +45,9 @@ def calculate_rsi(data, period=14):
 
 
 # === ADVANCED BACKTESTING ENGINE ===
-def backtest_strategy(data, strategy_type='ma_crossover', initial_capital=10000000):
+def backtest_strategy(data, strategy_type='ma_crossover', initial_capital=10000000, **cost_params):
     """Shared advanced backtesting engine wrapper."""
-    return shared_backtest_strategy(data, strategy_type, initial_capital)
+    return shared_backtest_strategy(data, strategy_type, initial_capital, **cost_params)
 
 def monte_carlo_simulation(data, strategy_type='ma_crossover', initial_capital=10000000, simulations=1000):
     """Shared Monte Carlo wrapper."""
@@ -171,14 +170,18 @@ def analyze_option_chain(ticker, current_price):
             'current_price': current_price,
             'option_chain': option_chain,
             'max_pain': current_price,  # Simplified max pain
-            'put_call_ratio': 0.8  # Simplified put/call ratio
+            'put_call_ratio': 0.8,  # Simplified put/call ratio
+            'data_status': 'SIMULATED',
+            'data_source': 'Black-Scholes estimate from historical volatility',
+            'as_of': datetime.now().isoformat(timespec='seconds'),
         }
         
     except Exception as e:
         return {
             'current_price': current_price,
             'option_chain': [],
-            'error': str(e)
+            'error': str(e),
+            'data_status': 'UNAVAILABLE',
         }
 
 # === SMART WATCHLIST & ALERTS ===
@@ -308,7 +311,7 @@ def calculate_dcf_value(ticker, growth_rate=0.05, discount_rate=0.10):
         financials = stock.financials
         
         if financials.empty:
-            return {'fair_value': 0, 'current_price': 0, 'upside': 0}
+            return {'fair_value': 0, 'current_price': 0, 'upside': 0, 'data_status': 'UNAVAILABLE'}
         
         # Get latest free cash flow (simplified)
         fcf = financials.loc['Total Cash From Operating Activities'].iloc[0] if 'Total Cash From Operating Activities' in financials.index else 0
@@ -343,11 +346,14 @@ def calculate_dcf_value(ticker, growth_rate=0.05, discount_rate=0.10):
             'assumptions': {
                 'growth_rate': growth_rate,
                 'discount_rate': discount_rate
-            }
+            },
+            'data_status': 'SIMPLIFIED_ESTIMATE',
+            'data_source': 'Yahoo Finance financial statements',
+            'as_of': datetime.now().isoformat(timespec='seconds'),
         }
         
     except Exception:
-        return {'fair_value': 0, 'current_price': 0, 'upside': 0, 'assumptions': {}}
+        return {'fair_value': 0, 'current_price': 0, 'upside': 0, 'assumptions': {}, 'data_status': 'UNAVAILABLE'}
 
 # === PAPER TRADING SIMULATOR ===
 class PaperTradingSimulator:
@@ -736,6 +742,22 @@ def evaluate_outcomes(price_data_by_symbol: Optional[Dict[str, pd.DataFrame]] = 
     except Exception as e:
         return f"Error: {str(e)}"
 
+
+def _chronological_split(X, y, test_size=0.2):
+    """Split ordered observations without allowing future rows into training."""
+    split_index = max(1, int(len(X) * (1 - test_size)))
+    return X.iloc[:split_index], X.iloc[split_index:], y.iloc[:split_index], y.iloc[split_index:]
+
+
+def _positive_probability(model, feature_frame):
+    """Return probability for outcome=1, including single-class models."""
+    probabilities = model.predict_proba(feature_frame)[0]
+    classes = list(model.classes_)
+    if 1 not in classes:
+        return 0.0
+    return float(probabilities[classes.index(1)])
+
+
 def train_model():
     """
     Train ML model + return accuracy + feature importance
@@ -751,7 +773,9 @@ def train_model():
         X = df[features]
         y = df["outcome"]
 
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+        X_train, X_test, y_train, y_test = _chronological_split(X, y)
+        if X_test.empty or y_train.nunique() < 2:
+            return None, 0, "Need both outcome classes and a non-empty chronological test set"
 
         model = RandomForestClassifier(
             n_estimators=300,
@@ -795,7 +819,9 @@ def train_regime_models():
             X = df_reg[features]
             y = df_reg["outcome"]
 
-            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+            X_train, X_test, y_train, y_test = _chronological_split(X, y)
+            if X_test.empty or y_train.nunique() < 2:
+                continue
 
             model = RandomForestClassifier(n_estimators=200, max_depth=5, random_state=42)
             model.fit(X_train, y_train)
@@ -850,14 +876,14 @@ def predict_signal_confidence(features, regime=None):
         "regime": features.get("regime", 0),
     }
     feature_df = pd.DataFrame([feature_payload])
-    prob = float(model.predict_proba(feature_df)[0][1])
+    prob = _positive_probability(model, feature_df)
 
     if regime is not None:
         regime_models, regime_accuracies = train_regime_models()
         regime_model = regime_models.get(int(regime))
         if regime_model is not None:
             feature_regime_df = feature_df[["rsi", "volume_ratio", "atr_pct", "ma_slope"]]
-            prob = float(regime_model.predict_proba(feature_regime_df)[0][1])
+            prob = _positive_probability(regime_model, feature_regime_df)
             accuracy = float(regime_accuracies.get(int(regime), accuracy))
 
     return {

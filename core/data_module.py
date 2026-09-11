@@ -253,6 +253,50 @@ def validate_stock_data(df: pd.DataFrame, min_rows: int = 20) -> Tuple[bool, str
     return True, "Valid"
 
 
+def assess_market_data_quality(df: Optional[pd.DataFrame], min_rows: int = 50) -> Dict[str, object]:
+    """Return compact quality diagnostics for a market-data frame."""
+    required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+    if df is None or df.empty:
+        return {
+            "status": "INVALID",
+            "rows": 0,
+            "last_timestamp": None,
+            "missing_columns": required_columns,
+            "message": "Data kosong",
+        }
+
+    missing_columns = [column for column in required_columns if column not in df.columns]
+    if missing_columns:
+        return {
+            "status": "INVALID",
+            "rows": len(df),
+            "last_timestamp": None,
+            "missing_columns": missing_columns,
+            "message": f"Kolom hilang: {missing_columns}",
+        }
+
+    critical_missing = int(df[['Close', 'Volume']].isnull().any(axis=1).sum())
+    if len(df) < min_rows or critical_missing:
+        message = f"Data tidak cukup ({len(df)}/{min_rows})" if len(df) < min_rows else "Ada data kosong di kolom penting"
+        return {
+            "status": "WARNING",
+            "rows": len(df),
+            "last_timestamp": df.index[-1],
+            "missing_columns": [],
+            "critical_missing_rows": critical_missing,
+            "message": message,
+        }
+
+    return {
+        "status": "GOOD",
+        "rows": len(df),
+        "last_timestamp": df.index[-1],
+        "missing_columns": [],
+        "critical_missing_rows": 0,
+        "message": "Valid",
+    }
+
+
 def get_sector_tickers(sector: str) -> list:
     """
     Get all tickers in a sector

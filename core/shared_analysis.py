@@ -7,7 +7,10 @@ def calculate_rsi(data, period=14):
     gain = delta.where(delta > 0, 0.0).rolling(window=period).mean()
     loss = (-delta.where(delta < 0, 0.0)).rolling(window=period).mean()
     rs = gain / loss.replace(0, np.nan)
-    return 100 - (100 / (1 + rs))
+    rsi = 100 - (100 / (1 + rs))
+    rsi = rsi.mask((loss == 0) & (gain > 0), 100)
+    rsi = rsi.mask((loss == 0) & (gain == 0), 50)
+    return rsi
 
 
 def calculate_bollinger_bands(data, period=20, std_dev=2):
@@ -93,7 +96,8 @@ def calculate_atr(data, period=14):
     return atr
 
 
-def backtest_strategy(data, strategy_type="ma_crossover", initial_capital=10000000):
+def backtest_strategy(data, strategy_type="ma_crossover", initial_capital=10000000,
+                      buy_fee=0.0, sell_fee=0.0, slippage=0.0, lot_size=1):
     try:
         results = {
             "total_trades": 0,
@@ -104,6 +108,14 @@ def backtest_strategy(data, strategy_type="ma_crossover", initial_capital=100000
             "total_return": 0,
             "equity_curve": [],
             "trades": [],
+            "total_fees": 0,
+            "total_slippage": 0,
+            "cost_assumptions": {
+                "buy_fee": buy_fee,
+                "sell_fee": sell_fee,
+                "slippage": slippage,
+                "lot_size": lot_size,
+            },
         }
 
         data = data.copy()
@@ -112,6 +124,12 @@ def backtest_strategy(data, strategy_type="ma_crossover", initial_capital=100000
         trades = []
         position = 0
         entry_price = 0
+        entry_cost = 0
+        total_fees = 0
+        total_slippage = 0
+
+        if buy_fee < 0 or sell_fee < 0 or slippage < 0 or lot_size < 1:
+            raise ValueError("Trading cost and lot size parameters must be non-negative")
 
         if strategy_type == "ma_crossover":
             data["SMA20"] = data["Close"].rolling(20).mean()
@@ -120,11 +138,15 @@ def backtest_strategy(data, strategy_type="ma_crossover", initial_capital=100000
             for i in range(50, len(data)):
                 current_price = data["Close"].iloc[i]
                 if data["SMA20"].iloc[i] > data["SMA50"].iloc[i] and position == 0:
-                    shares = int(capital / current_price)
+                    execution_price = current_price * (1 + slippage)
+                    shares = int(capital / (execution_price * (1 + buy_fee)) / lot_size) * lot_size
                     if shares > 0:
                         position = shares
-                        entry_price = current_price
-                        capital -= shares * current_price
+                        entry_price = execution_price
+                        entry_cost = shares * execution_price * (1 + buy_fee)
+                        total_fees += shares * execution_price * buy_fee
+                        total_slippage += shares * abs(execution_price - current_price)
+                        capital -= entry_cost
                         trades.append(
                             {
                                 "type": "BUY",
@@ -135,15 +157,20 @@ def backtest_strategy(data, strategy_type="ma_crossover", initial_capital=100000
                             }
                         )
                 elif data["SMA20"].iloc[i] < data["SMA50"].iloc[i] and position > 0:
-                    capital += position * current_price
+                    execution_price = current_price * (1 - slippage)
+                    gross_proceeds = position * execution_price
+                    sell_cost = gross_proceeds * sell_fee
+                    capital += gross_proceeds - sell_cost
+                    total_fees += sell_cost
+                    total_slippage += position * abs(execution_price - current_price)
                     trades.append(
                         {
                             "type": "SELL",
-                            "price": current_price,
+                            "price": execution_price,
                             "shares": position,
                             "date": data.index[i],
                             "capital": capital,
-                            "profit": (current_price - entry_price) * position,
+                            "profit": gross_proceeds - sell_cost - entry_cost,
                         }
                     )
                     position = 0
@@ -155,11 +182,15 @@ def backtest_strategy(data, strategy_type="ma_crossover", initial_capital=100000
                 current_price = data["Close"].iloc[i]
                 current_rsi = data["RSI"].iloc[i]
                 if current_rsi < 30 and position == 0:
-                    shares = int(capital / current_price)
+                    execution_price = current_price * (1 + slippage)
+                    shares = int(capital / (execution_price * (1 + buy_fee)) / lot_size) * lot_size
                     if shares > 0:
                         position = shares
-                        entry_price = current_price
-                        capital -= shares * current_price
+                        entry_price = execution_price
+                        entry_cost = shares * execution_price * (1 + buy_fee)
+                        total_fees += shares * execution_price * buy_fee
+                        total_slippage += shares * abs(execution_price - current_price)
+                        capital -= entry_cost
                         trades.append(
                             {
                                 "type": "BUY",
@@ -170,15 +201,20 @@ def backtest_strategy(data, strategy_type="ma_crossover", initial_capital=100000
                             }
                         )
                 elif current_rsi > 70 and position > 0:
-                    capital += position * current_price
+                    execution_price = current_price * (1 - slippage)
+                    gross_proceeds = position * execution_price
+                    sell_cost = gross_proceeds * sell_fee
+                    capital += gross_proceeds - sell_cost
+                    total_fees += sell_cost
+                    total_slippage += position * abs(execution_price - current_price)
                     trades.append(
                         {
                             "type": "SELL",
-                            "price": current_price,
+                            "price": execution_price,
                             "shares": position,
                             "date": data.index[i],
                             "capital": capital,
-                            "profit": (current_price - entry_price) * position,
+                            "profit": gross_proceeds - sell_cost - entry_cost,
                         }
                     )
                     position = 0
@@ -211,6 +247,8 @@ def backtest_strategy(data, strategy_type="ma_crossover", initial_capital=100000
                 results["sharpe_ratio"] = avg_return / std_return if std_return > 0 else 0
 
             results["total_return"] = ((equity_curve[-1] - initial_capital) / initial_capital) * 100
+            results["total_fees"] = total_fees
+            results["total_slippage"] = total_slippage
             results["equity_curve"] = equity_curve
             results["trades"] = trades
 
