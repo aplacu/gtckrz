@@ -1,0 +1,43 @@
+# Python cache and local runtime artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local logs
+logs/
+*.log
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+secrets/
+config.local.py
+
+# Generated analysis exports
+*.xlsx
+*.xls
+stock_scan_result_*.csv
+
+# Local virtual environments and tooling
+.venv/
+venv/
+env/
+.python-version
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/settings.example.json
+.idea/
+
+# Local notes and experiments
+local/
+notes/

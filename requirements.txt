@@ -1,0 +1,13 @@
+streamlit
+yfinance
+pandas
+plotly
+openpyxl
+numpy
+scikit-learn
+scipy
+requests
+beautifulsoup4
+textblob
+schedule
+matplotlib
