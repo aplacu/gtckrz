@@ -9,8 +9,8 @@ from datetime import datetime, timedelta, date
 from typing import Dict, Optional, Tuple
 import numpy as np
 
-from logger import data_logger, PerformanceLogger
-from config import (
+from core.logger import data_logger, PerformanceLogger
+from core.config import (
     CHUNK_SIZE_DOWNLOADS,
     MAX_RETRIES_DOWNLOAD,
     TIMEOUT_DOWNLOAD,
@@ -20,8 +20,8 @@ from config import (
 )
 
 # Import stock lists
-from stock_data import SECTOR_STOCKS
-from idx_all_tickers import IDX_TICKERS
+from core.stock_data import SECTOR_STOCKS
+from core.idx_all_tickers import IDX_TICKERS
 
 
 def build_stock_lookup():

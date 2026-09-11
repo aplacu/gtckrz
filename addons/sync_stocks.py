@@ -3,7 +3,7 @@ Skrip untuk sinkronisasi stock_data.py dengan idx_all_tickers.py
 Menggunakan yfinance untuk mendapatkan informasi sektor
 """
 import yfinance as yf
-from idx_all_tickers import IDX_TICKERS
+from core.idx_all_tickers import IDX_TICKERS
 import json
 
 # Mapping sektor IDX ke kategori kita - lebih lengkap

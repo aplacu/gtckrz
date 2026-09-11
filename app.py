@@ -6,22 +6,22 @@ import plotly.express as px
 import numpy as np
 from datetime import date, datetime, timedelta
 from io import BytesIO
-from stock_data import SECTOR_STOCKS
-from idx_all_tickers import IDX_TICKERS
+from core.stock_data import SECTOR_STOCKS
+from core.idx_all_tickers import IDX_TICKERS
 from textblob import TextBlob
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 import time
 import os
 import math
-from shared_analysis import (
+from core.shared_analysis import (
     calculate_rsi as shared_calculate_rsi,
     backtest_strategy as shared_backtest_strategy,
     monte_carlo_simulation as shared_monte_carlo_simulation,
     detect_price_patterns as shared_detect_price_patterns,
     check_volume_spike as shared_check_volume_spike,
 )
-from enhanced_analyzer import (
+from core.enhanced_analyzer import (
     EnhancedStockAnalyzer, PaperTradingSimulator, get_fundamental_ratios,
     calculate_dcf_value, create_advanced_chart,
     analyze_option_chain as ea_analyze_option_chain,
@@ -42,9 +42,9 @@ from enhanced_analyzer import (
     export_dataset_to_excel as ea_export_dataset_to_excel,
     load_signal_dataset as ea_load_signal_dataset,
 )
-from market_timing import comprehensive_timing_analysis
-from telegram_bot import TelegramBot, create_telegram_bot
-from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+from core.market_timing import comprehensive_timing_analysis
+from addons.telegram_bot import TelegramBot, create_telegram_bot
+from core.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
 SIDEBAR_ALERTS_KEY = "realtime_alerts"
 SMART_ALERTS_KEY = "smart_alerts"

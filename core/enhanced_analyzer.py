@@ -14,7 +14,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from shared_analysis import (
+from core.shared_analysis import (
     calculate_rsi as shared_calculate_rsi,
     backtest_strategy as shared_backtest_strategy,
     monte_carlo_simulation as shared_monte_carlo_simulation,

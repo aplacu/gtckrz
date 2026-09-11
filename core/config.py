@@ -7,7 +7,7 @@ from pathlib import Path
 from datetime import timedelta
 
 # ==================== PATH CONFIGURATION ====================
-APP_ROOT = Path(__file__).parent
+APP_ROOT = Path(__file__).resolve().parent.parent
 LOGS_DIR = APP_ROOT / "logs"
 DATA_DIR = APP_ROOT / "data"
 
